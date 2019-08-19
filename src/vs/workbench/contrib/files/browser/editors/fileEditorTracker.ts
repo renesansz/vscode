@@ -7,7 +7,7 @@ import { IWorkbenchContribution } from 'vs/workbench/common/contributions';
 import { URI } from 'vs/base/common/uri';
 import * as resources from 'vs/base/common/resources';
 import { IEditorViewState } from 'vs/editor/common/editorCommon';
-import { toResource, SideBySideEditorInput, IWorkbenchEditorConfiguration } from 'vs/workbench/common/editor';
+import { toResource, SideBySideEditorInput, IWorkbenchEditorConfiguration, SideBySideEditor as SideBySideEditorChoice } from 'vs/workbench/common/editor';
 import { ITextFileService, ITextFileEditorModel } from 'vs/workbench/services/textfile/common/textfiles';
 import { FileOperationEvent, FileOperation, IFileService, FileChangeType, FileChangesEvent } from 'vs/platform/files/common/files';
 import { FileEditorInput } from 'vs/workbench/contrib/files/common/editors/fileEditorInput';
@@ -16,7 +16,6 @@ import { Disposable, IDisposable, dispose } from 'vs/base/common/lifecycle';
 import { distinct, coalesce } from 'vs/base/common/arrays';
 import { IEnvironmentService } from 'vs/platform/environment/common/environment';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { isLinux } from 'vs/base/common/platform';
 import { ResourceMap } from 'vs/base/common/map';
 import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
 import { isCodeEditor } from 'vs/editor/browser/editorBrowser';
@@ -31,7 +30,7 @@ import { withNullAsUndefined } from 'vs/base/common/types';
 
 export class FileEditorTracker extends Disposable implements IWorkbenchContribution {
 
-	private closeOnFileDelete: boolean;
+	private closeOnFileDelete: boolean | undefined;
 	private modelLoadQueue = new ResourceQueue();
 	private activeOutOfWorkspaceWatchers = new ResourceMap<IDisposable>();
 
@@ -91,7 +90,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 			distinct(
 				coalesce(this.editorService.visibleEditors
 					.map(editorInput => {
-						const resource = toResource(editorInput, { supportSideBySide: true });
+						const resource = toResource(editorInput, { supportSideBySide: SideBySideEditorChoice.MASTER });
 						return resource ? this.textFileService.models.get(resource) : undefined;
 					}))
 					.filter(model => !model.isDirty()),
@@ -132,7 +131,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 
 	private handleDeletes(arg1: URI | FileChangesEvent, isExternal: boolean, movedTo?: URI): void {
 		const nonDirtyFileEditors = this.getOpenedFileEditors(false /* non-dirty only */);
-		nonDirtyFileEditors.forEach(editor => {
+		nonDirtyFileEditors.forEach(async editor => {
 			const resource = editor.getResource();
 
 			// Handle deletes in opened editors depending on:
@@ -165,20 +164,17 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 				// file is really gone and not just a faulty file event.
 				// This only applies to external file events, so we need to check for the isExternal
 				// flag.
-				let checkExists: Promise<boolean>;
+				let exists = false;
 				if (isExternal) {
-					checkExists = timeout(100).then(() => this.fileService.exists(resource));
-				} else {
-					checkExists = Promise.resolve(false);
+					await timeout(100);
+					exists = await this.fileService.exists(resource);
 				}
 
-				checkExists.then(exists => {
-					if (!exists && !editor.isDisposed()) {
-						editor.dispose();
-					} else if (this.environmentService.verbose) {
-						console.warn(`File exists even though we received a delete event: ${resource.toString()}`);
-					}
-				});
+				if (!exists && !editor.isDisposed()) {
+					editor.dispose();
+				} else if (this.environmentService.verbose) {
+					console.warn(`File exists even though we received a delete event: ${resource.toString()}`);
+				}
 			}
 		});
 	}
@@ -224,7 +220,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 						if (oldResource.toString() === resource.toString()) {
 							reopenFileResource = newResource; // file got moved
 						} else {
-							const index = this.getIndexOfPath(resource.path, oldResource.path);
+							const index = this.getIndexOfPath(resource.path, oldResource.path, resources.hasToIgnoreCase(resource));
 							reopenFileResource = resources.joinPath(newResource, resource.path.substr(index + oldResource.path.length + 1)); // parent folder got moved
 						}
 
@@ -247,7 +243,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 		});
 	}
 
-	private getIndexOfPath(path: string, candidate: string): number {
+	private getIndexOfPath(path: string, candidate: string, ignoreCase: boolean): number {
 		if (candidate.length > path.length) {
 			return -1;
 		}
@@ -256,7 +252,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 			return 0;
 		}
 
-		if (!isLinux /* ignore case */) {
+		if (ignoreCase) {
 			path = path.toLowerCase();
 			candidate = candidate.toLowerCase();
 		}
@@ -317,7 +313,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 	private handleUpdatesToVisibleBinaryEditors(e: FileChangesEvent): void {
 		const editors = this.editorService.visibleControls;
 		editors.forEach(editor => {
-			const resource = editor.input ? toResource(editor.input, { supportSideBySide: true }) : undefined;
+			const resource = editor.input ? toResource(editor.input, { supportSideBySide: SideBySideEditorChoice.MASTER }) : undefined;
 
 			// Support side-by-side binary editors too
 			let isBinaryEditor = false;
@@ -338,7 +334,7 @@ export class FileEditorTracker extends Disposable implements IWorkbenchContribut
 	private handleOutOfWorkspaceWatchers(): void {
 		const visibleOutOfWorkspacePaths = new ResourceMap<URI>();
 		coalesce(this.editorService.visibleEditors.map(editorInput => {
-			return toResource(editorInput, { supportSideBySide: true });
+			return toResource(editorInput, { supportSideBySide: SideBySideEditorChoice.MASTER });
 		})).filter(resource => {
 			return this.fileService.canHandleResource(resource) && !this.contextService.isInsideWorkspace(resource);
 		}).forEach(resource => {

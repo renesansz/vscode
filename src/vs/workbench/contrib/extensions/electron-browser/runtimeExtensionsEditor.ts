@@ -23,7 +23,7 @@ import { ActionBar, Separator } from 'vs/base/browser/ui/actionbar/actionbar';
 import { dispose, IDisposable } from 'vs/base/common/lifecycle';
 import { RunOnceScheduler } from 'vs/base/common/async';
 import { clipboard } from 'electron';
-import { EnablementState } from 'vs/platform/extensionManagement/common/extensionManagement';
+import { EnablementState } from 'vs/workbench/services/extensionManagement/common/extensionManagement';
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IWindowService, IWindowsService } from 'vs/platform/windows/common/windows';
 import { writeFile } from 'vs/base/node/pfs';
@@ -43,6 +43,7 @@ import { renderOcticons } from 'vs/base/browser/ui/octiconLabel/octiconLabel';
 import { ExtensionIdentifier, ExtensionType, IExtensionDescription } from 'vs/platform/extensions/common/extensions';
 import { REMOTE_HOST_SCHEME } from 'vs/platform/remote/common/remoteHosts';
 import { SlowExtensionAction } from 'vs/workbench/contrib/extensions/electron-browser/extensionsSlowActions';
+import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 
 export const IExtensionHostProfileService = createDecorator<IExtensionHostProfileService>('extensionHostProfileService');
 export const CONTEXT_PROFILE_SESSION_STATE = new RawContextKey<string>('profileSessionState', 'none');
@@ -119,7 +120,7 @@ export class RuntimeExtensionsEditor extends BaseEditor {
 		@IExtensionHostProfileService private readonly _extensionHostProfileService: IExtensionHostProfileService,
 		@IStorageService storageService: IStorageService,
 		@ILabelService private readonly _labelService: ILabelService,
-		@IWindowService private readonly _windowService: IWindowService
+		@IWorkbenchEnvironmentService private readonly _environmentService: IWorkbenchEnvironmentService
 	) {
 		super(RuntimeExtensionsEditor.ID, telemetryService, themeService, storageService);
 
@@ -378,12 +379,12 @@ export class RuntimeExtensionsEditor extends BaseEditor {
 
 				if (element.description.extensionLocation.scheme !== 'file') {
 					const el = $('span');
-					el.innerHTML = renderOcticons(`$(rss) ${element.description.extensionLocation.authority}`);
+					el.innerHTML = renderOcticons(`$(remote) ${element.description.extensionLocation.authority}`);
 					data.msgContainer.appendChild(el);
 
-					const hostLabel = this._labelService.getHostLabel(REMOTE_HOST_SCHEME, this._windowService.getConfiguration().remoteAuthority);
+					const hostLabel = this._labelService.getHostLabel(REMOTE_HOST_SCHEME, this._environmentService.configuration.remoteAuthority);
 					if (hostLabel) {
-						el.innerHTML = renderOcticons(`$(rss) ${hostLabel}`);
+						el.innerHTML = renderOcticons(`$(remote) ${hostLabel}`);
 					}
 				}
 
@@ -404,7 +405,7 @@ export class RuntimeExtensionsEditor extends BaseEditor {
 			multipleSelectionSupport: false,
 			setRowLineHeight: false,
 			horizontalScrolling: false
-		}) as WorkbenchList<IRuntimeExtension>;
+		});
 
 		this._list.splice(0, this._list.length, this._elements || undefined);
 
@@ -419,8 +420,8 @@ export class RuntimeExtensionsEditor extends BaseEditor {
 			actions.push(new Separator());
 
 			if (e.element.marketplaceInfo) {
-				actions.push(new Action('runtimeExtensionsEditor.action.disableWorkspace', nls.localize('disable workspace', "Disable (Workspace)"), undefined, true, () => this._extensionsWorkbenchService.setEnablement(e.element!.marketplaceInfo, EnablementState.WorkspaceDisabled)));
-				actions.push(new Action('runtimeExtensionsEditor.action.disable', nls.localize('disable', "Disable"), undefined, true, () => this._extensionsWorkbenchService.setEnablement(e.element!.marketplaceInfo, EnablementState.Disabled)));
+				actions.push(new Action('runtimeExtensionsEditor.action.disableWorkspace', nls.localize('disable workspace', "Disable (Workspace)"), undefined, true, () => this._extensionsWorkbenchService.setEnablement(e.element!.marketplaceInfo, EnablementState.DisabledWorkspace)));
+				actions.push(new Action('runtimeExtensionsEditor.action.disable', nls.localize('disable', "Disable"), undefined, true, () => this._extensionsWorkbenchService.setEnablement(e.element!.marketplaceInfo, EnablementState.DisabledGlobally)));
 				actions.push(new Separator());
 			}
 			const state = this._extensionHostProfileService.state;

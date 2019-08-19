@@ -87,6 +87,7 @@ const indentationFilter = [
 	'!build/azure-pipelines/**/*.js',
 	'!build/azure-pipelines/**/*.config',
 	'!**/Dockerfile',
+	'!**/Dockerfile.*',
 	'!**/*.Dockerfile',
 	'!**/*.dockerfile',
 	'!extensions/markdown-language-features/media/*.js'
@@ -118,7 +119,8 @@ const copyrightFilter = [
 	'!resources/completions/**',
 	'!extensions/markdown-language-features/media/highlight.css',
 	'!extensions/html-language-features/server/src/modes/typescript/*',
-	'!extensions/*/server/bin/*'
+	'!extensions/*/server/bin/*',
+	'!src/vs/editor/test/node/classification/typescript-test.ts',
 ];
 
 const eslintFilter = [
@@ -133,18 +135,37 @@ const eslintFilter = [
 	'!**/test/**'
 ];
 
-const tslintFilter = [
-	'src/**/*.ts',
-	'test/**/*.ts',
-	'extensions/**/*.ts',
+const tslintBaseFilter = [
 	'!**/fixtures/**',
 	'!**/typings/**',
 	'!**/node_modules/**',
-	'!extensions/typescript/test/colorize-fixtures/**',
+	'!extensions/typescript-basics/test/colorize-fixtures/**',
 	'!extensions/vscode-api-tests/testWorkspace/**',
 	'!extensions/vscode-api-tests/testWorkspace2/**',
 	'!extensions/**/*.test.ts',
 	'!extensions/html-language-features/server/lib/jquery.d.ts'
+];
+
+const tslintCoreFilter = [
+	'src/**/*.ts',
+	'test/**/*.ts',
+	'!extensions/**/*.ts',
+	'!test/smoke/**',
+	...tslintBaseFilter
+];
+
+const tslintExtensionsFilter = [
+	'extensions/**/*.ts',
+	'!src/**/*.ts',
+	'!test/**/*.ts',
+	...tslintBaseFilter
+];
+
+const tslintHygieneFilter = [
+	'src/**/*.ts',
+	'test/**/*.ts',
+	'extensions/**/*.ts',
+	...tslintBaseFilter
 ];
 
 const copyrightHeaderLines = [
@@ -163,16 +184,35 @@ gulp.task('eslint', () => {
 });
 
 gulp.task('tslint', () => {
-	const options = { emitError: true };
+	return es.merge([
 
-	return vfs.src(all, { base: '.', follow: true, allowEmpty: true })
-		.pipe(filter(tslintFilter))
-		.pipe(gulptslint.default({ rulesDirectory: 'build/lib/tslint' }))
-		.pipe(gulptslint.default.report(options));
+		// Core: include type information (required by certain rules like no-nodejs-globals)
+		vfs.src(all, { base: '.', follow: true, allowEmpty: true })
+			.pipe(filter(tslintCoreFilter))
+			.pipe(gulptslint.default({ rulesDirectory: 'build/lib/tslint', program: tslint.Linter.createProgram('src/tsconfig.json') }))
+			.pipe(gulptslint.default.report({ emitError: true })),
+
+		// Exenstions: do not include type information
+		vfs.src(all, { base: '.', follow: true, allowEmpty: true })
+			.pipe(filter(tslintExtensionsFilter))
+			.pipe(gulptslint.default({ rulesDirectory: 'build/lib/tslint' }))
+			.pipe(gulptslint.default.report({ emitError: true }))
+	]);
 });
 
 function hygiene(some) {
 	let errorCount = 0;
+
+	const productJson = es.through(function (file) {
+		const product = JSON.parse(file.contents.toString('utf8'));
+
+		if (product.extensionsGallery) {
+			console.error('product.json: Contains "extensionsGallery"');
+			errorCount++;
+		}
+
+		this.emit('data', file);
+	});
 
 	const indentation = es.through(function (file) {
 		const lines = file.contents.toString('utf8').split(/\r\n|\r|\n/);
@@ -257,15 +297,20 @@ function hygiene(some) {
 		input = some;
 	}
 
+	const productJsonFilter = filter('product.json', { restore: true });
+
 	const result = input
 		.pipe(filter(f => !f.stat.isDirectory()))
+		.pipe(productJsonFilter)
+		.pipe(process.env['BUILD_SOURCEVERSION'] ? es.through() : productJson)
+		.pipe(productJsonFilter.restore)
 		.pipe(filter(indentationFilter))
 		.pipe(indentation)
 		.pipe(filter(copyrightFilter))
 		.pipe(copyrights);
 
 	const typescript = result
-		.pipe(filter(tslintFilter))
+		.pipe(filter(tslintHygieneFilter))
 		.pipe(formatting)
 		.pipe(tsl);
 

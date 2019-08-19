@@ -92,12 +92,11 @@ export interface IWindowsMainService {
 	readonly onWindowClose: Event<number>;
 
 	// methods
-	ready(initialUserEnv: IProcessEnvironment): void;
 	reload(win: ICodeWindow, cli?: ParsedArgs): void;
 	enterWorkspace(win: ICodeWindow, path: URI): Promise<IEnterWorkspaceResult | undefined>;
 	closeWorkspace(win: ICodeWindow): void;
 	open(openConfig: IOpenConfiguration): ICodeWindow[];
-	openExtensionDevelopmentHostWindow(extensionDevelopmentPath: string, openConfig: IOpenConfiguration): void;
+	openExtensionDevelopmentHostWindow(extensionDevelopmentPath: string | string[], openConfig: IOpenConfiguration): void;
 	pickFileFolderAndOpen(options: INativeOpenDialogOptions): Promise<void>;
 	pickFolderAndOpen(options: INativeOpenDialogOptions): Promise<void>;
 	pickFileAndOpen(options: INativeOpenDialogOptions): Promise<void>;
@@ -133,6 +132,7 @@ export interface IOpenConfiguration {
 	readonly forceEmpty?: boolean;
 	readonly diffMode?: boolean;
 	addMode?: boolean;
+	readonly gotoLineMode?: boolean;
 	readonly initialStartup?: boolean;
 	readonly noRecentEntry?: boolean;
 }

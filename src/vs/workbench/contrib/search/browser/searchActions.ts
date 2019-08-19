@@ -7,14 +7,11 @@ import * as DOM from 'vs/base/browser/dom';
 import { Action } from 'vs/base/common/actions';
 import { INavigator } from 'vs/base/common/iterator';
 import { createKeybinding, ResolvedKeybinding } from 'vs/base/common/keyCodes';
-import { normalizeDriveLetter } from 'vs/base/common/labels';
-import { Schemas } from 'vs/base/common/network';
-import { normalize } from 'vs/base/common/path';
 import { isWindows, OS } from 'vs/base/common/platform';
 import { repeat } from 'vs/base/common/strings';
-import { URI } from 'vs/base/common/uri';
 import * as nls from 'vs/nls';
 import { IClipboardService } from 'vs/platform/clipboard/common/clipboardService';
+import { ILabelService } from 'vs/platform/label/common/label';
 import { ICommandHandler } from 'vs/platform/commands/common/commands';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
@@ -160,19 +157,35 @@ export abstract class FindOrReplaceInFilesAction extends Action {
 		});
 	}
 }
-
-export class FindInFilesAction extends FindOrReplaceInFilesAction {
-
-	static readonly LABEL = nls.localize('findInFiles', "Find in Files");
-
-	constructor(id: string, label: string,
-		@IViewletService viewletService: IViewletService,
-		@IPanelService panelService: IPanelService,
-		@IConfigurationService configurationService: IConfigurationService
-	) {
-		super(id, label, viewletService, panelService, configurationService, /*expandSearchReplaceWidget=*/false);
-	}
+export interface IFindInFilesArgs {
+	query?: string;
+	replace?: string;
+	triggerSearch?: boolean;
+	filesToInclude?: string;
+	filesToExclude?: string;
+	isRegex?: boolean;
+	isCaseSensitive?: boolean;
+	matchWholeWord?: boolean;
 }
+export const FindInFilesCommand: ICommandHandler = (accessor, args: IFindInFilesArgs = {}) => {
+
+	const viewletService = accessor.get(IViewletService);
+	const panelService = accessor.get(IPanelService);
+	const configurationService = accessor.get(IConfigurationService);
+	openSearchView(viewletService, panelService, configurationService, false).then(openedView => {
+		if (openedView) {
+			const searchAndReplaceWidget = openedView.searchAndReplaceWidget;
+			searchAndReplaceWidget.toggleReplace(typeof args.replace === 'string');
+			let updatedText = false;
+			if (typeof args.query === 'string') {
+				openedView.setSearchParameters(args);
+			} else {
+				updatedText = openedView.updateTextFromSelection((typeof args.replace !== 'string'));
+			}
+			openedView.searchAndReplaceWidget.focus(undefined, updatedText, updatedText);
+		}
+	});
+};
 
 export class OpenSearchViewletAction extends FindOrReplaceInFilesAction {
 
@@ -243,18 +256,16 @@ export class RefreshAction extends Action {
 	static readonly ID: string = 'search.action.refreshSearchResults';
 	static LABEL: string = nls.localize('RefreshAction.label', "Refresh");
 
-	private searchView: SearchView | undefined;
-
 	constructor(id: string, label: string,
 		@IViewletService private readonly viewletService: IViewletService,
 		@IPanelService private readonly panelService: IPanelService
 	) {
 		super(id, label, 'search-action refresh');
-		this.searchView = getSearchView(this.viewletService, this.panelService);
 	}
 
 	get enabled(): boolean {
-		return !!this.searchView && this.searchView.isSearchSubmitted();
+		const searchView = getSearchView(this.viewletService, this.panelService);
+		return !!searchView && searchView.hasSearchResults();
 	}
 
 	update(): void {
@@ -370,7 +381,7 @@ export class CancelSearchAction extends Action {
 
 	update(): void {
 		const searchView = getSearchView(this.viewletService, this.panelService);
-		this.enabled = !!searchView && searchView.isSearching();
+		this.enabled = !!searchView && searchView.isSlowSearch();
 	}
 
 	run(): Promise<void> {
@@ -640,28 +651,25 @@ export class ReplaceAction extends AbstractSearchAndReplaceAction {
 	}
 
 	private hasSameParent(element: RenderableMatch): boolean {
-		return element && element instanceof Match && element.parent().resource() === this.element.parent().resource();
+		return element && element instanceof Match && element.parent().resource === this.element.parent().resource;
 	}
 
 	private hasToOpenFile(): boolean {
 		const activeEditor = this.editorService.activeEditor;
 		const file = activeEditor ? activeEditor.getResource() : undefined;
 		if (file) {
-			return file.toString() === this.element.parent().resource().toString();
+			return file.toString() === this.element.parent().resource.toString();
 		}
 		return false;
 	}
 }
 
-function uriToClipboardString(resource: URI): string {
-	return resource.scheme === Schemas.file ? normalize(normalizeDriveLetter(resource.fsPath)) : resource.toString();
-}
-
-export const copyPathCommand: ICommandHandler = (accessor, fileMatch: FileMatch | FolderMatch) => {
+export const copyPathCommand: ICommandHandler = async (accessor, fileMatch: FileMatch | FolderMatch) => {
 	const clipboardService = accessor.get(IClipboardService);
+	const labelService = accessor.get(ILabelService);
 
-	const text = uriToClipboardString(fileMatch.resource());
-	clipboardService.writeText(text);
+	const text = labelService.getUriLabel(fileMatch.resource, { noPrefix: true });
+	await clipboardService.writeText(text);
 };
 
 function matchToString(match: Match, indent = 0): string {
@@ -692,25 +700,26 @@ function matchToString(match: Match, indent = 0): string {
 }
 
 const lineDelimiter = isWindows ? '\r\n' : '\n';
-function fileMatchToString(fileMatch: FileMatch, maxMatches: number): { text: string, count: number } {
+function fileMatchToString(fileMatch: FileMatch, maxMatches: number, labelService: ILabelService): { text: string, count: number } {
 	const matchTextRows = fileMatch.matches()
 		.sort(searchMatchComparer)
 		.slice(0, maxMatches)
 		.map(match => matchToString(match, 2));
+	const uriString = labelService.getUriLabel(fileMatch.resource, { noPrefix: true });
 	return {
-		text: `${uriToClipboardString(fileMatch.resource())}${lineDelimiter}${matchTextRows.join(lineDelimiter)}`,
+		text: `${uriString}${lineDelimiter}${matchTextRows.join(lineDelimiter)}`,
 		count: matchTextRows.length
 	};
 }
 
-function folderMatchToString(folderMatch: FolderMatch | BaseFolderMatch, maxMatches: number): { text: string, count: number } {
+function folderMatchToString(folderMatch: FolderMatch | BaseFolderMatch, maxMatches: number, labelService: ILabelService): { text: string, count: number } {
 	const fileResults: string[] = [];
 	let numMatches = 0;
 
 	const matches = folderMatch.matches().sort(searchMatchComparer);
 
 	for (let i = 0; i < folderMatch.fileCount() && numMatches < maxMatches; i++) {
-		const fileResult = fileMatchToString(matches[i], maxMatches - numMatches);
+		const fileResult = fileMatchToString(matches[i], maxMatches - numMatches, labelService);
 		numMatches += fileResult.count;
 		fileResults.push(fileResult.text);
 	}
@@ -722,29 +731,30 @@ function folderMatchToString(folderMatch: FolderMatch | BaseFolderMatch, maxMatc
 }
 
 const maxClipboardMatches = 1e4;
-export const copyMatchCommand: ICommandHandler = (accessor, match: RenderableMatch) => {
+export const copyMatchCommand: ICommandHandler = async (accessor, match: RenderableMatch) => {
 	const clipboardService = accessor.get(IClipboardService);
+	const labelService = accessor.get(ILabelService);
 
 	let text: string | undefined;
 	if (match instanceof Match) {
 		text = matchToString(match);
 	} else if (match instanceof FileMatch) {
-		text = fileMatchToString(match, maxClipboardMatches).text;
+		text = fileMatchToString(match, maxClipboardMatches, labelService).text;
 	} else if (match instanceof BaseFolderMatch) {
-		text = folderMatchToString(match, maxClipboardMatches).text;
+		text = folderMatchToString(match, maxClipboardMatches, labelService).text;
 	}
 
 	if (text) {
-		clipboardService.writeText(text);
+		await clipboardService.writeText(text);
 	}
 };
 
-function allFolderMatchesToString(folderMatches: Array<FolderMatch | BaseFolderMatch>, maxMatches: number): string {
+function allFolderMatchesToString(folderMatches: Array<FolderMatch | BaseFolderMatch>, maxMatches: number, labelService: ILabelService): string {
 	const folderResults: string[] = [];
 	let numMatches = 0;
 	folderMatches = folderMatches.sort(searchMatchComparer);
 	for (let i = 0; i < folderMatches.length && numMatches < maxMatches; i++) {
-		const folderResult = folderMatchToString(folderMatches[i], maxMatches - numMatches);
+		const folderResult = folderMatchToString(folderMatches[i], maxMatches - numMatches, labelService);
 		if (folderResult.count) {
 			numMatches += folderResult.count;
 			folderResults.push(folderResult.text);
@@ -754,17 +764,18 @@ function allFolderMatchesToString(folderMatches: Array<FolderMatch | BaseFolderM
 	return folderResults.join(lineDelimiter + lineDelimiter);
 }
 
-export const copyAllCommand: ICommandHandler = accessor => {
+export const copyAllCommand: ICommandHandler = async (accessor) => {
 	const viewletService = accessor.get(IViewletService);
 	const panelService = accessor.get(IPanelService);
 	const clipboardService = accessor.get(IClipboardService);
+	const labelService = accessor.get(ILabelService);
 
 	const searchView = getSearchView(viewletService, panelService);
 	if (searchView) {
 		const root = searchView.searchResult;
 
-		const text = allFolderMatchesToString(root.folderMatches(), maxClipboardMatches);
-		clipboardService.writeText(text);
+		const text = allFolderMatchesToString(root.folderMatches(), maxClipboardMatches, labelService);
+		await clipboardService.writeText(text);
 	}
 };
 

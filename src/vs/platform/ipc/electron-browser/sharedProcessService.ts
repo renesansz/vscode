@@ -23,7 +23,7 @@ export interface ISharedProcessService {
 
 export class SharedProcessService implements ISharedProcessService {
 
-	_serviceBrand: ServiceIdentifier<any>;
+	_serviceBrand!: ServiceIdentifier<any>;
 
 	private withSharedProcessConnection: Promise<Client<string>>;
 
@@ -33,7 +33,7 @@ export class SharedProcessService implements ISharedProcessService {
 		@IEnvironmentService environmentService: IEnvironmentService
 	) {
 		this.withSharedProcessConnection = windowsService.whenSharedProcessReady()
-			.then(() => connect(environmentService.sharedIPCHandle, `window:${windowService.getCurrentWindowId()}`));
+			.then(() => connect(environmentService.sharedIPCHandle, `window:${windowService.windowId}`));
 	}
 
 	getChannel(channelName: string): IChannel {

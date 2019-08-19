@@ -6,7 +6,7 @@
 import { URI } from 'vs/base/common/uri';
 import { IListService, WorkbenchAsyncDataTree } from 'vs/platform/list/browser/listService';
 import { OpenEditor } from 'vs/workbench/contrib/files/common/files';
-import { toResource } from 'vs/workbench/common/editor';
+import { toResource, SideBySideEditor } from 'vs/workbench/common/editor';
 import { List } from 'vs/base/browser/ui/list/listWidget';
 import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { ExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
@@ -14,7 +14,7 @@ import { coalesce } from 'vs/base/common/arrays';
 
 // Commands can get exeucted from a command pallete, from a context menu or from some list using a keybinding
 // To cover all these cases we need to properly compute the resource on which the command is being executed
-export function getResourceForCommand(resource: URI | object | undefined, listService: IListService, editorService: IEditorService): URI | null {
+export function getResourceForCommand(resource: URI | object | undefined, listService: IListService, editorService: IEditorService): URI | undefined {
 	if (URI.isUri(resource)) {
 		return resource;
 	}
@@ -41,7 +41,7 @@ export function getResourceForCommand(resource: URI | object | undefined, listSe
 		}
 	}
 
-	return editorService.activeEditor ? toResource(editorService.activeEditor, { supportSideBySide: true }) : null;
+	return editorService.activeEditor ? toResource(editorService.activeEditor, { supportSideBySide: SideBySideEditor.MASTER }) : undefined;
 }
 
 export function getMultiSelectedResources(resource: URI | object | undefined, listService: IListService, editorService: IEditorService): Array<URI> {

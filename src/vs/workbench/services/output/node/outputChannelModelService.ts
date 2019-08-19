@@ -16,8 +16,7 @@ import { Disposable } from 'vs/base/common/lifecycle';
 import { ILogService } from 'vs/platform/log/common/log';
 import { IOutputChannelModel, AbstractFileOutputChannelModel, IOutputChannelModelService, AsbtractOutputChannelModelService, BufferredOutputChannel } from 'vs/workbench/services/output/common/outputChannelModel';
 import { OutputAppender } from 'vs/workbench/services/output/node/outputAppender';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
-import { IWindowService } from 'vs/platform/windows/common/windows';
+import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { toLocalISOString } from 'vs/base/common/date';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
@@ -118,8 +117,8 @@ class OutputChannelBackedByFile extends AbstractFileOutputChannelModel implement
 	}
 
 	private loadFile(): Promise<string> {
-		return this.fileService.resolveContent(this.file, { position: this.startOffset, encoding: 'utf8' })
-			.then(content => this.appendedMessage ? content.value + this.appendedMessage : content.value);
+		return this.fileService.readFile(this.file, { position: this.startOffset })
+			.then(content => this.appendedMessage ? content.value + this.appendedMessage : content.value.toString());
 	}
 
 	protected updateModel(): void {
@@ -170,10 +169,7 @@ class DelegatedOutputChannelModel extends Disposable implements IOutputChannelMo
 		} catch (e) {
 			// Do not crash if spdlog rotating logger cannot be loaded (workaround for https://github.com/Microsoft/vscode/issues/47883)
 			this.logService.error(e);
-			/* __GDPR__
-				"output.channel.creation.error" : {}
-			*/
-			this.telemetryService.publicLog('output.channel.creation.error');
+			this.telemetryService.publicLog2('output.channel.creation.error');
 			outputChannelModel = this.instantiationService.createInstance(BufferredOutputChannel, modelUri, mimeType);
 		}
 		this._register(outputChannelModel);
@@ -206,8 +202,7 @@ export class OutputChannelModelService extends AsbtractOutputChannelModelService
 
 	constructor(
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IEnvironmentService private readonly environmentService: IEnvironmentService,
-		@IWindowService private readonly windowService: IWindowService,
+		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 		@IFileService private readonly fileService: IFileService
 	) {
 		super(instantiationService);
@@ -218,10 +213,10 @@ export class OutputChannelModelService extends AsbtractOutputChannelModelService
 			this.instantiationService.createInstance(DelegatedOutputChannelModel, id, modelUri, mimeType, this.outputDir);
 	}
 
-	private _outputDir: Promise<URI> | null;
+	private _outputDir: Promise<URI> | null = null;
 	private get outputDir(): Promise<URI> {
 		if (!this._outputDir) {
-			const outputDir = URI.file(join(this.environmentService.logsPath, `output_${this.windowService.getCurrentWindowId()}_${toLocalISOString(new Date()).replace(/-|:|\.\d+Z$/g, '')}`));
+			const outputDir = URI.file(join(this.environmentService.logsPath, `output_${this.environmentService.configuration.windowId}_${toLocalISOString(new Date()).replace(/-|:|\.\d+Z$/g, '')}`));
 			this._outputDir = this.fileService.createFolder(outputDir).then(() => outputDir);
 		}
 		return this._outputDir;

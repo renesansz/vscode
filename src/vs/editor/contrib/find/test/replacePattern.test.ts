@@ -5,6 +5,7 @@
 
 import * as assert from 'assert';
 import { ReplacePattern, ReplacePiece, parseReplaceString } from 'vs/editor/contrib/find/replacePattern';
+import { buildReplaceStringWithCasePreserved } from 'vs/base/common/search';
 
 suite('Replace Pattern test', () => {
 
@@ -152,5 +153,50 @@ suite('Replace Pattern test', () => {
 		let matches = /a(z)?/.exec('abcd');
 		let actual = replacePattern.buildReplaceString(matches);
 		assert.equal(actual, 'a{}');
+	});
+
+	test('buildReplaceStringWithCasePreserved test', () => {
+		let replacePattern = 'Def';
+		let actual: string | string[] = 'abc';
+
+		assert.equal(buildReplaceStringWithCasePreserved([actual], replacePattern), 'def');
+		actual = 'Abc';
+		assert.equal(buildReplaceStringWithCasePreserved([actual], replacePattern), 'Def');
+		actual = 'ABC';
+		assert.equal(buildReplaceStringWithCasePreserved([actual], replacePattern), 'DEF');
+
+		actual = ['abc', 'Abc'];
+		assert.equal(buildReplaceStringWithCasePreserved(actual, replacePattern), 'def');
+		actual = ['Abc', 'abc'];
+		assert.equal(buildReplaceStringWithCasePreserved(actual, replacePattern), 'Def');
+		actual = ['ABC', 'abc'];
+		assert.equal(buildReplaceStringWithCasePreserved(actual, replacePattern), 'DEF');
+
+		actual = ['AbC'];
+		assert.equal(buildReplaceStringWithCasePreserved(actual, replacePattern), 'Def');
+		actual = ['aBC'];
+		assert.equal(buildReplaceStringWithCasePreserved(actual, replacePattern), 'Def');
+	});
+
+	test('preserve case', () => {
+		let replacePattern = parseReplaceString('Def');
+		let actual = replacePattern.buildReplaceString(['abc'], true);
+		assert.equal(actual, 'def');
+		actual = replacePattern.buildReplaceString(['Abc'], true);
+		assert.equal(actual, 'Def');
+		actual = replacePattern.buildReplaceString(['ABC'], true);
+		assert.equal(actual, 'DEF');
+
+		actual = replacePattern.buildReplaceString(['abc', 'Abc'], true);
+		assert.equal(actual, 'def');
+		actual = replacePattern.buildReplaceString(['Abc', 'abc'], true);
+		assert.equal(actual, 'Def');
+		actual = replacePattern.buildReplaceString(['ABC', 'abc'], true);
+		assert.equal(actual, 'DEF');
+
+		actual = replacePattern.buildReplaceString(['AbC'], true);
+		assert.equal(actual, 'Def');
+		actual = replacePattern.buildReplaceString(['aBC'], true);
+		assert.equal(actual, 'Def');
 	});
 });

@@ -10,7 +10,7 @@ import * as Types from 'vs/base/common/types';
 import { Schemas } from 'vs/base/common/network';
 import { toResource } from 'vs/workbench/common/editor';
 import { IStringDictionary, forEach, fromMap } from 'vs/base/common/collections';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
+import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import { IWorkspaceFolder, IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
@@ -20,22 +20,21 @@ import { isCodeEditor } from 'vs/editor/browser/editorBrowser';
 import { DiffEditorInput } from 'vs/workbench/common/editor/diffEditorInput';
 import { IQuickInputService, IInputOptions, IQuickPickItem, IPickOptions } from 'vs/platform/quickinput/common/quickInput';
 import { ConfiguredInput, IConfigurationResolverService } from 'vs/workbench/services/configurationResolver/common/configurationResolver';
-import { IWindowService } from 'vs/platform/windows/common/windows';
+import { IProcessEnvironment } from 'vs/base/common/platform';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
 
-
-export class ConfigurationResolverService extends AbstractVariableResolverService {
+export abstract class BaseConfigurationResolverService extends AbstractVariableResolverService {
 
 	static INPUT_OR_COMMAND_VARIABLES_PATTERN = /\${((input|command):(.*?))}/g;
 
 	constructor(
-		@IWindowService windowService: IWindowService,
-		@IEditorService editorService: IEditorService,
-		@IEnvironmentService environmentService: IEnvironmentService,
-		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@ICommandService private readonly commandService: ICommandService,
-		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
-		@IQuickInputService private readonly quickInputService: IQuickInputService
+		envVariables: IProcessEnvironment,
+		editorService: IEditorService,
+		environmentService: IWorkbenchEnvironmentService,
+		private readonly configurationService: IConfigurationService,
+		private readonly commandService: ICommandService,
+		private readonly workspaceContextService: IWorkspaceContextService,
+		private readonly quickInputService: IQuickInputService
 	) {
 		super({
 			getFolderUri: (folderName: string): uri | undefined => {
@@ -56,7 +55,7 @@ export class ConfigurationResolverService extends AbstractVariableResolverServic
 				if (activeEditor instanceof DiffEditorInput) {
 					activeEditor = activeEditor.modifiedInput;
 				}
-				const fileResource = toResource(activeEditor, { filter: Schemas.file });
+				const fileResource = toResource(activeEditor, { filterByScheme: Schemas.file });
 				if (!fileResource) {
 					return undefined;
 				}
@@ -84,7 +83,7 @@ export class ConfigurationResolverService extends AbstractVariableResolverServic
 				}
 				return undefined;
 			}
-		}, windowService.getConfiguration().userEnv);
+		}, envVariables);
 	}
 
 	public resolveWithInteractionReplace(folder: IWorkspaceFolder | undefined, config: any, section?: string, variables?: IStringDictionary<string>): Promise<any> {
@@ -201,7 +200,7 @@ export class ConfigurationResolverService extends AbstractVariableResolverServic
 	private findVariables(object: any, variables: string[]) {
 		if (typeof object === 'string') {
 			let matches;
-			while ((matches = ConfigurationResolverService.INPUT_OR_COMMAND_VARIABLES_PATTERN.exec(object)) !== null) {
+			while ((matches = BaseConfigurationResolverService.INPUT_OR_COMMAND_VARIABLES_PATTERN.exec(object)) !== null) {
 				if (matches.length === 4) {
 					const command = matches[1];
 					if (variables.indexOf(command) < 0) {
@@ -228,6 +227,10 @@ export class ConfigurationResolverService extends AbstractVariableResolverServic
 	 */
 	private showUserInput(variable: string, inputInfos: ConfiguredInput[]): Promise<string | undefined> {
 
+		if (!inputInfos) {
+			return Promise.reject(new Error(nls.localize('inputVariable.noInputSection', "Variable '{0}' must be defined in an '{1}' section of the debug or task configuration.", variable, 'input')));
+		}
+
 		// find info for the given input variable
 		const info = inputInfos.filter(item => item.id === variable).pop();
 		if (info) {
@@ -247,7 +250,7 @@ export class ConfigurationResolverService extends AbstractVariableResolverServic
 						inputOptions.value = info.default;
 					}
 					return this.quickInputService.input(inputOptions).then(resolvedInput => {
-						return resolvedInput ? resolvedInput : undefined;
+						return resolvedInput;
 					});
 				}
 
@@ -291,6 +294,20 @@ export class ConfigurationResolverService extends AbstractVariableResolverServic
 			}
 		}
 		return Promise.reject(new Error(nls.localize('inputVariable.undefinedVariable', "Undefined input variable '{0}' encountered. Remove or define '{0}' to continue.", variable)));
+	}
+}
+
+export class ConfigurationResolverService extends BaseConfigurationResolverService {
+
+	constructor(
+		@IEditorService editorService: IEditorService,
+		@IWorkbenchEnvironmentService environmentService: IWorkbenchEnvironmentService,
+		@IConfigurationService configurationService: IConfigurationService,
+		@ICommandService commandService: ICommandService,
+		@IWorkspaceContextService workspaceContextService: IWorkspaceContextService,
+		@IQuickInputService quickInputService: IQuickInputService
+	) {
+		super(environmentService.configuration.userEnv, editorService, environmentService, configurationService, commandService, workspaceContextService, quickInputService);
 	}
 }
 
